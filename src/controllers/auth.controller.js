@@ -1,16 +1,16 @@
 import { pool } from '../db.js';
 import bcrypt from 'bcryptjs';
 import { createAccessToken } from '../libs/jwt.js';
+import crypto from 'crypto';
+import nodemailer from 'nodemailer';
 
 export const register = async (req, res) => {
   const { document_number, first_name, last_name, email, address, password } =
     req.body;
 
   try {
-    // Encriptar la contraseña
     const passwordHash = await bcrypt.hash(password, 10);
 
-    // Insertar el usuario en la base de datos
     const result = await pool.query(
       `INSERT INTO users (document_number, first_name, last_name, email, address, password, role_id, status) 
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
@@ -24,18 +24,15 @@ export const register = async (req, res) => {
         passwordHash,
         1,
         'active',
-      ] // Asignar rol 1 y estado 'active'
+      ]
     );
 
     const user = result.rows[0];
 
-    // Crear el token de acceso
     const token = await createAccessToken({ id: user.id });
 
-    // Configurar la cookie con el token
     res.cookie('token', token, { httpOnly: true });
 
-    // Responder con el token y los datos del usuario
     res.status(201).json({
       token,
       user: {
@@ -49,11 +46,9 @@ export const register = async (req, res) => {
       },
     });
   } catch (error) {
-    // Manejo de errores
     if (error.code === '23505') {
-      // Código de error para duplicados en PostgreSQL
       res.status(400).json({
-        message: 'El número de documento o correo ya está registrado.',
+        message: 'The document or email number is already registered.',
       });
     } else {
       res.status(500).json({ message: error.message });
@@ -65,7 +60,6 @@ export const login = async (req, res) => {
   const { document_number, password } = req.body;
 
   try {
-    // Buscar al usuario por número de documento
     const result = await pool.query(
       `SELECT id, document_number, first_name, last_name, email, password 
        FROM users 
@@ -75,31 +69,26 @@ export const login = async (req, res) => {
 
     const userFound = result.rows[0];
 
-    // Verificar si el usuario existe
     if (!userFound) {
-      return res.status(400).json({ message: 'Usuario no encontrado' });
+      return res.status(400).json({ message: 'User not found' });
     }
 
-    // Comparar la contraseña proporcionada con la almacenada
     const isMatch = await bcrypt.compare(password, userFound.password);
     if (!isMatch) {
-      return res.status(400).json({ message: 'Contraseña incorrecta' });
+      return res.status(400).json({ message: 'Incorrect password' });
     }
 
-    // Crear el token de acceso
     const token = await createAccessToken({
       id: userFound.id,
       document_number: userFound.document_number,
     });
 
-    // Configurar la cookie con el token
     res.cookie('token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'none',
     });
 
-    // Responder con datos mínimos
     res.json({
       token,
       user: {
@@ -108,27 +97,24 @@ export const login = async (req, res) => {
       },
     });
   } catch (error) {
-    // Manejo de errores
     res.status(500).json({ message: error.message });
   }
 };
 
 export const logout = (req, res) => {
   res.cookie('token', '', {
-    httpOnly: true, // Evita que el cliente acceda a la cookie desde JavaScript
-    secure: process.env.NODE_ENV === 'production', // Solo en HTTPS en producción
-    sameSite: 'none', // Permite cookies entre dominios
-    expires: new Date(0), // Fecha de expiración en el pasado para eliminarla
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'none',
+    expires: new Date(0),
   });
-  res.status(200).json({ message: 'Successfully logged out' }); // Respuesta con código 200 (éxito)
+  res.status(200).json({ message: 'Successfully logged out' });
 };
 
 export const profile = async (req, res) => {
   try {
-    // Obtener el id del usuario desde el token (req.user.id)
     const userId = req.user.id;
 
-    // Consultar al usuario en la base de datos por su id
     const result = await pool.query(
       `SELECT id, document_number, first_name, last_name, email, address, created_at
        FROM users
@@ -138,12 +124,10 @@ export const profile = async (req, res) => {
 
     const userFound = result.rows[0];
 
-    // Verificar si el usuario existe
     if (!userFound) {
-      return res.status(400).json({ message: 'Usuario no encontrado' });
+      return res.status(400).json({ message: 'User not found' });
     }
 
-    // Devolver los datos del usuario, sin incluir la contraseña
     return res.json({
       id: userFound.id,
       document_number: userFound.document_number,
@@ -154,7 +138,76 @@ export const profile = async (req, res) => {
       created_at: userFound.created_at,
     });
   } catch (error) {
-    // Manejo de errores
     return res.status(500).json({ message: error.message });
+  }
+};
+
+export const requestPasswordReset = async (req, res) => {
+  const { document_number, email } = req.body;
+
+  try {
+    const result = await pool.query(
+      'SELECT id, email FROM users WHERE document_number = $1 AND email = $2',
+      [document_number, email]
+    );
+
+    const user = result.rows[0];
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const resetCode = crypto.randomBytes(4).toString('hex');
+
+    await pool.query(
+      "UPDATE users SET reset_code = $1, reset_code_expiration = NOW() + INTERVAL '15 minutes' WHERE id = $2",
+      [resetCode, user.id]
+    );
+
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    });
+
+    await transporter.sendMail({
+      from: process.env.EMAIL_USER,
+      to: user.email,
+      subject: 'Password recovery code',
+      text: `Your recovery code is: ${resetCode}. This code will expire in 15 minutes.`,
+    });
+
+    res.json({
+      message: 'Recovery code sent to email',
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+export const resetPassword = async (req, res) => {
+  const { document_number, reset_code, new_password } = req.body;
+
+  try {
+    const result = await pool.query(
+      'SELECT id FROM users WHERE document_number = $1 AND reset_code = $2 AND reset_code_expiration > NOW()',
+      [document_number, reset_code]
+    );
+
+    const user = result.rows[0];
+    if (!user) {
+      return res.status(400).json({ message: 'Invalid or expired code' });
+    }
+
+    const hashedPassword = await bcrypt.hash(new_password, 10);
+    await pool.query(
+      'UPDATE users SET password = $1, reset_code = NULL, reset_code_expiration = NULL WHERE id = $2',
+      [hashedPassword, user.id]
+    );
+
+    res.json({ message: 'Password updated successfully' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
   }
 };
