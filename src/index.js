@@ -15,7 +15,7 @@ app.use(express.json());
 app.use(cookieParser());
 app.use('/api', authRoutes);
 app.use(usersRoutes);
-app.use(clientsRoutes);
+app.use('/api', clientsRoutes);
 app.use(medicalNeedTypeRoutes);
 app.use(medicalHistoryRoutes);
 
