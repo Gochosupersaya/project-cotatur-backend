@@ -74,37 +74,29 @@ export const deleteClient = async (req, res) => {
   const { id } = req.params;
 
   try {
-    // Iniciar una transacción para asegurar consistencia
     await pool.query('BEGIN');
 
-    // Eliminar registros asociados en la tabla medical_history
     await pool.query('DELETE FROM medical_history WHERE client_id = $1', [id]);
 
-    // Actualizar la columna representative_id a NULL en la tabla clients
     await pool.query(
       'UPDATE clients SET representative_id = NULL WHERE representative_id = $1',
       [id]
     );
 
-    // Eliminar el cliente
     const { rowCount } = await pool.query(
       'DELETE FROM clients WHERE id = $1 RETURNING *',
       [id]
     );
 
     if (rowCount === 0) {
-      // Si el cliente no existe, deshacer la transacción
       await pool.query('ROLLBACK');
       return res.status(404).json({ message: 'Client not found' });
     }
 
-    // Confirmar la transacción
     await pool.query('COMMIT');
 
-    // Responder con un mensaje de éxito
     res.status(200).json({ message: 'Client successfully deleted' });
   } catch (error) {
-    // En caso de error, deshacer la transacción
     await pool.query('ROLLBACK');
     console.error(error);
     res.status(500).json({ message: 'Internal server error' });
