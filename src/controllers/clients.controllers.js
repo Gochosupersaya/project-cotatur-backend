@@ -78,6 +78,8 @@ export const deleteClient = async (req, res) => {
 
     await pool.query('DELETE FROM medical_history WHERE client_id = $1', [id]);
 
+    await pool.query('DELETE FROM bookings WHERE client_id = $1', [id]);
+
     await pool.query(
       'UPDATE clients SET representative_id = NULL WHERE representative_id = $1',
       [id]

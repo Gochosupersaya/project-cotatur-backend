@@ -6,6 +6,7 @@ import clientsRoutes from './routes/clients.routes.js';
 import medicalNeedTypeRoutes from './routes/medicalNeedType.routes.js';
 import medicalHistoryRoutes from './routes/medicalHistory.routes.js';
 import activityRoutes from './routes/activity.routes.js';
+import bookingRoutes from './routes/bookings.routes.js';
 import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
 
@@ -21,6 +22,7 @@ app.use('/api', clientsRoutes);
 app.use(medicalNeedTypeRoutes);
 app.use('/api', medicalHistoryRoutes);
 app.use('/api', activityRoutes);
+app.use('/api', bookingRoutes);
 
 app.listen(PORT);
 console.log('server on port', PORT);
